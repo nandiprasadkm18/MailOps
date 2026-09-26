@@ -1,0 +1,23 @@
+import Redis from 'ioredis';
+import { config } from '../config';
+
+export const redisConnection = {
+  host: config.redis.host,
+  port: config.redis.port,
+  maxRetriesPerRequest: null,
+};
+
+// Shared Redis client for rate limiting and other operations
+export const redisClient = new Redis({
+  host: config.redis.host,
+  port: config.redis.port,
+  maxRetriesPerRequest: null,
+});
+
+redisClient.on('error', (err) => {
+  console.error('[Redis] Connection error:', err.message);
+});
+
+redisClient.on('connect', () => {
+  console.log('[Redis] Connected successfully');
+});

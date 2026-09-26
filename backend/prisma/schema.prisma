@@ -1,0 +1,76 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Email {
+  id           String      @id @default(uuid())
+  tenantId     String
+  senderId     String
+  toAddress    String
+  subject      String
+  body         String
+  scheduledAt  DateTime
+  status       EmailStatus @default(pending)
+  bullJobId    String?
+  sentAt       DateTime?
+  errorMessage String?
+  hourlyLimit  Int?        @default(50)  // per-schedule hourly limit set by user
+  isStarred    Boolean     @default(false)
+  isArchived   Boolean     @default(false)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  sender       Sender      @relation(fields: [senderId], references: [id])
+
+  @@index([tenantId])
+  @@index([status])
+  @@index([senderId])
+  @@index([scheduledAt])
+  @@index([subject])
+  @@index([toAddress])
+}
+
+model Sender {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  email     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  emails    Email[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+}
+
+model SlackIntegration {
+  id          String   @id @default(uuid())
+  tenantId    String   @unique
+  webhookUrl  String
+  accessToken String
+  teamName    String?
+  channelName String?
+  connectedAt DateTime @default(now())
+}
+
+model User {
+  id        String   @id @default(uuid())
+  tenantId  String   @default(uuid())
+  googleId  String   @unique
+  email     String   @unique
+  name      String
+  avatarUrl String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum EmailStatus {
+  pending
+  queued
+  sent
+  failed
+}
