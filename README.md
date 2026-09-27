@@ -79,6 +79,146 @@ ReachSched is a robust email scheduling and delivery platform designed for resil
 
 ## Architecture Overview
 
+```mermaid
+flowchart TD
+    %% -------------------------------------
+    %% Global Styles
+    %% -------------------------------------
+    classDef frontend fill:#f8fafc,stroke:#94a3b8,stroke-width:1px,color:#0f172a,rx:6px,ry:6px;
+    classDef backend fill:#f1f5f9,stroke:#64748b,stroke-width:1px,color:#0f172a,rx:6px,ry:6px;
+    classDef worker fill:#fffbeb,stroke:#fbbf24,stroke-width:1px,color:#78350f,rx:6px,ry:6px;
+    classDef db fill:#f0fdf4,stroke:#4ade80,stroke-width:1px,color:#14532d,rx:6px,ry:6px;
+    classDef external fill:#fafafa,stroke:#a3a3a3,stroke-width:1px,stroke-dasharray: 4 4,color:#171717,rx:6px,ry:6px;
+    classDef layer fill:#ffffff,stroke:#e2e8f0,stroke-width:2px,rx:8px,ry:8px,color:#1e293b,font-weight:600;
+    classDef note fill:#fefce8,stroke:#fef08a,stroke-width:1px,color:#854d0e,font-size:12px,rx:4px,ry:4px;
+
+    %% -------------------------------------
+    %% Nodes & Subgraphs
+    %% -------------------------------------
+
+    subgraph Docker ["Deployment: Dockerized Services"]
+        direction TB
+
+        subgraph ClientLayer ["1. Frontend — React / TypeScript"]
+            direction LR
+            F_Auth["Login / Google OAuth<br/>User Profile / Logout"]
+            F_Dash["Dashboard<br/>Compose Email<br/>CSV / TXT Recipient Upload"]
+            F_List["Scheduled Emails<br/>Sent Emails<br/>Search & Filters"]
+        end
+        class ClientLayer layer
+        class F_Auth,F_Dash,F_List frontend
+
+        subgraph BackendLayer ["2. Backend — Node.js + Express + TypeScript"]
+            direction LR
+            B_Auth["Authentication"]
+            B_API["Email Scheduling API<br/>Email Management API"]
+            B_Config["Sender Management<br/>Rate Limit Configuration"]
+            B_Search["Search API"]
+            B_Slack["Slack Integration"]
+            B_Admin["Bull Board"]
+        end
+        class BackendLayer layer
+        class B_Auth,B_API,B_Config,B_Search,B_Slack,B_Admin backend
+
+        subgraph ProcessingLayer ["3. Async Job Processing"]
+            direction LR
+            Q_Redis["Redis / BullMQ<br/>Delayed Jobs"]
+            W_Worker["Email Worker<br/>• Fetch scheduled jobs<br/>• Persistent delayed processing<br/>• Idempotency checks<br/>• Retry failed emails<br/>• Update email status<br/>• Index email in Elasticsearch"]
+            RL["Distributed Rate Limiter<br/>• Sender & Global Hourly Limit<br/>• Minimum Delay<br/>• Atomic Redis Lua Check<br/>• Reschedule to Next Available Hour"]
+        end
+        class ProcessingLayer layer
+        class Q_Redis,W_Worker,RL worker
+
+        subgraph StorageLayer ["4. Persistent Storage"]
+            direction LR
+            DB_PG[("PostgreSQL<br/>• Users, Senders, Emails<br/>• Schedules, Slack Integrations<br/>• Email Status, Rate-limit config")]
+            DB_Redis[("Redis<br/>• BullMQ queue state, Delayed jobs<br/>• Distributed rate-limit counters<br/>• Idempotency / locks")]
+            DB_ES[("Elasticsearch<br/>• Searchable email index<br/>• Scheduled & Sent emails<br/>• Email metadata")]
+        end
+        class StorageLayer layer
+        class DB_PG,DB_Redis,DB_ES db
+    end
+    class Docker layer
+
+    subgraph SideLayer ["External Services & Integrations"]
+        direction TB
+        Ext_OAuth["Google OAuth"]
+        Auth_Local["Email/Password Authentication<br/>(Register / Login)"]
+        Ext_SlackAPI["Slack Notification Service<br/>Slack Webhook/API<br/>Configured Slack Channel"]
+    end
+    class SideLayer layer
+    class Ext_OAuth,Ext_SlackAPI external
+    class Auth_Local backend
+
+    subgraph DeliveryLayer ["5. Email Delivery"]
+        direction LR
+        Ext_SMTP["Ethereal SMTP — Assignment/Test Delivery"]
+        Ext_Users(("Recipient 1<br/>Recipient 2<br/>Recipient 3<br/>...<br/>1000+ scheduled emails"))
+    end
+    class DeliveryLayer layer
+    class Ext_SMTP,Ext_Users external
+
+    N_Restart["Restart-safe:<br/>API Restart ↓<br/>PostgreSQL + Redis/BullMQ retain state ↓<br/>Worker reconnects ↓<br/>Scheduled jobs continue processing"]
+    class N_Restart note
+
+    subgraph Legend ["Legend"]
+        direction LR
+        L1["Solid arrow = synchronous API/data interaction"]
+        L2["Queue arrow (dotted) = asynchronous job processing"]
+        L3["External service = third-party integration"]
+        L4["Persistent storage = durable state"]
+    end
+    class Legend layer
+
+    %% -------------------------------------
+    %% Connections & Flows
+    %% -------------------------------------
+    
+    linkStyle default stroke-width:1px,fill:none,stroke:#64748b;
+
+    %% Client -> Backend
+    F_Dash -->|REST API / HTTP| B_API
+    F_List -->|Frontend Search| B_Search
+    F_Auth -->|Frontend -> Backend| B_Auth
+
+    %% Auth Flows
+    B_Auth -->|Backend -> Google OAuth| Ext_OAuth
+    Ext_OAuth -.->|Authenticated Session -> Dashboard| F_Dash
+    B_Auth -->|Register -> bcrypt password hashing<br/>Login -> Session authentication| Auth_Local
+    Auth_Local -->|Store/Verify| DB_PG
+
+    %% API -> Queue / Storage
+    B_API -->|Backend API -> Redis / BullMQ| Q_Redis
+    B_Config -->|Read/Write Config| DB_PG
+    B_Search -->|Backend Search API -> Elasticsearch| DB_ES
+    DB_ES -.->|Matching Scheduled / Sent Emails -> Frontend| F_List
+
+    %% Slack Auth
+    B_Slack -->|OAuth connection stored in PostgreSQL| DB_PG
+
+    %% Admin
+    B_Admin -.->|Operational Queue Monitoring<br/>Waiting / Delayed / Active / Completed / Failed| DB_Redis
+
+    %% Queue -> Worker
+    Q_Redis -->|Fetch scheduled jobs| W_Worker
+
+    %% Worker -> Rate Limiting
+    W_Worker -->|Email Worker -> Distributed Rate Limiter<br/>Allowed -> Send| RL
+    RL -.->|Limit Reached -> Reschedule Job<br/>Next Available Hour| Q_Redis
+    RL -->|Atomic Lua Check| DB_Redis
+
+    %% Worker -> Delivery & Notifications
+    W_Worker -->|Email Worker -> Ethereal SMTP| Ext_SMTP
+    Ext_SMTP -->|Ethereal SMTP -> Recipient Email| Ext_Users
+    W_Worker -->|Rate Limit Reached -> Slack Notification Service| Ext_SlackAPI
+    Ext_SlackAPI -.->|Immediate notification when sender hourly limit is reached| Ext_SlackAPI
+
+    %% Worker -> Failures / Updates
+    W_Worker -.->|SMTP Failure -> BullMQ Retry<br/>Retry Attempt -> Successful Send| Q_Redis
+    W_Worker -->|Maximum Attempts Reached -> Email Status: FAILED -> Error Stored| DB_PG
+    W_Worker -->|Index email in Elasticsearch| DB_ES
+```
+
 ### Scheduling
 
 Frontend
