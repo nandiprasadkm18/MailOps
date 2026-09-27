@@ -37,4 +37,4 @@ COPY --from=builder /app/dist ./dist
 
 EXPOSE 5000
 
-CMD ["node", "dist/server.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy || exit $?; node dist/server.js & api_pid=$!; node dist/worker.js & worker_pid=$!; wait $api_pid $worker_pid"]

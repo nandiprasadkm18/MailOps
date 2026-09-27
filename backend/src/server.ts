@@ -15,6 +15,7 @@ import authRoutes from './routes/auth.routes';
 import slackRoutes from './routes/slack.routes';
 
 const app = express();
+app.set('trust proxy', 1);
 
 // --- Middleware ---
 app.use(cors({
