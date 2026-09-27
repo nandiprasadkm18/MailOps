@@ -4,6 +4,12 @@ import { Email, EmailStatus } from '@prisma/client';
 
 export const elasticClient = new Client({
   node: config.elasticsearch.url,
+  auth: config.elasticsearch.password
+    ? {
+        username: config.elasticsearch.username,
+        password: config.elasticsearch.password,
+      }
+    : undefined,
   // The @elastic/elasticsearch v8 client sends an Accept header with
   // "compatible-with=8"; we don't need to manually override it as it causes duplicate headers.
 });
