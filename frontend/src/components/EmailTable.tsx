@@ -65,7 +65,7 @@ export const EmailTable: React.FC<EmailTableProps> = ({ type, refreshKey }) => {
     }
   }, [fetchEmails, type]);
 
-  const columns = [
+  const columns: any[] = [
     {
       key: 'toAddress',
       header: 'Recipient',
@@ -122,14 +122,14 @@ export const EmailTable: React.FC<EmailTableProps> = ({ type, refreshKey }) => {
 
       <Table
         columns={columns}
-        data={emails}
+        data={emails as any[]}
         isLoading={isLoading}
         emptyMessage={
           type === 'scheduled'
             ? "Your scheduled queue is empty. Start a new batch."
             : "No sent history found."
         }
-        keyExtractor={(email) => email.id}
+        keyExtractor={(email: any) => email.id}
       />
 
       {totalPages > 1 && (

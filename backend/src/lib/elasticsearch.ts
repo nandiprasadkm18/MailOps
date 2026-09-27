@@ -85,6 +85,17 @@ export async function updateEmailStatus(id: string, status: EmailStatus, sentAt?
   }
 }
 
+export async function removeEmailFromIndex(id: string) {
+  try {
+    await elasticClient.delete({
+      index: indexName,
+      id,
+    });
+  } catch (error) {
+    console.error(`[Elasticsearch] Failed to remove email ${id}:`, error instanceof Error ? error.message : error);
+  }
+}
+
 export async function searchEmails(tenantId: string, query: string, page = 1, limit = 50) {
   try {
     const result = await elasticClient.search({

@@ -50,21 +50,30 @@ export function configurePassport(): void {
               return done(new Error('No email found in Google profile'), undefined);
             }
 
-            // Upsert user
-            const user = await prisma.user.upsert({
-              where: { googleId: profile.id },
-              update: {
-                email,
-                name,
-                avatarUrl,
-              },
-              create: {
-                googleId: profile.id,
-                email,
-                name,
-                avatarUrl,
-              },
-            });
+            // Upsert user by email first to prevent duplicate email constraint failure
+            let user = await prisma.user.findUnique({ where: { email } });
+            
+            if (user) {
+              // Account exists, update googleId and profile info if needed
+              user = await prisma.user.update({
+                where: { email },
+                data: {
+                  googleId: profile.id,
+                  name: user.name || name,
+                  avatarUrl: user.avatarUrl || avatarUrl,
+                },
+              });
+            } else {
+              // New user
+              user = await prisma.user.create({
+                data: {
+                  googleId: profile.id,
+                  email,
+                  name,
+                  avatarUrl,
+                },
+              });
+            }
 
             return done(null, user);
           } catch (error) {

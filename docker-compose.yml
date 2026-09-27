@@ -1,50 +1,134 @@
-version: "3.9"
-
 services:
+
   postgres:
     image: postgres:16-alpine
     container_name: reachsched-postgres
     restart: unless-stopped
+
     ports:
       - "5433:5432"
+
     environment:
       POSTGRES_USER: reachsched
       POSTGRES_PASSWORD: reachsched_secret
       POSTGRES_DB: reachsched
+
     volumes:
       - pgdata:/var/lib/postgresql/data
+
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U reachsched"]
+      test: ["CMD-SHELL", "pg_isready -U reachsched -d reachsched"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 10s
+
 
   redis:
     image: redis:7-alpine
     container_name: reachsched-redis
     restart: unless-stopped
+
     ports:
       - "6379:6379"
+
     volumes:
       - redisdata:/data
+
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 5s
+
 
   elasticsearch:
     image: elasticsearch:8.15.0
     container_name: reachsched-elasticsearch
+    restart: unless-stopped
+
     environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+
     ports:
       - "9200:9200"
+
     volumes:
       - esdata:/usr/share/elasticsearch/data
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fs http://localhost:9200/_cluster/health || exit 1"
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+
+    container_name: reachsched-api
     restart: unless-stopped
+
+    env_file:
+      - ./backend/.env
+
+    environment:
+      DATABASE_URL: "postgresql://reachsched:reachsched_secret@postgres:5432/reachsched?schema=public"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      ELASTICSEARCH_URL: "http://elasticsearch:9200"
+      ELASTICSEARCH_INDEX: emails
+
+    ports:
+      - "5000:5000"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+
+    container_name: reachsched-worker
+    restart: unless-stopped
+
+    env_file:
+      - ./backend/.env
+
+    environment:
+      DATABASE_URL: "postgresql://reachsched:reachsched_secret@postgres:5432/reachsched?schema=public"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      ELASTICSEARCH_URL: "http://elasticsearch:9200"
+      ELASTICSEARCH_INDEX: emails
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+
+    command: ["node", "dist/worker.js"]
+
 
 volumes:
   pgdata:

@@ -58,14 +58,15 @@ model SlackIntegration {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  tenantId  String   @default(uuid())
-  googleId  String   @unique
-  email     String   @unique
-  name      String
-  avatarUrl String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String   @id @default(uuid())
+  tenantId     String   @default(uuid())
+  googleId     String?  @unique
+  email        String   @unique
+  passwordHash String?
+  name         String
+  avatarUrl    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 enum EmailStatus {

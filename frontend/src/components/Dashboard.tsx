@@ -17,6 +17,15 @@ import Integrations from './Integrations';
 
 type ViewState = 'scheduled' | 'sent' | 'integrations';
 
+const formatEmailTimestamp = (dateString: string | null | undefined) => {
+  if (!dateString) return '';
+  const d = new Date(dateString);
+  if (isNaN(d.getTime())) return '';
+  const datePart = d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const timePart = d.toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+  return `${datePart} · ${timePart}`;
+};
+
 export default function DashboardPage() {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
@@ -30,9 +39,12 @@ export default function DashboardPage() {
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   
   // Login State
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [loginName, setLoginName] = useState('');
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [isLoginLoading, setIsLoginLoading] = useState(false);
+  const [authError, setAuthError] = useState('');
   
   // Compose State
   const [subject, setSubject] = useState('');
@@ -45,6 +57,7 @@ export default function DashboardPage() {
   const [hourlyLimit, setHourlyLimit] = useState('10');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showScheduleDropdown, setShowScheduleDropdown] = useState(false);
+  const [uploadedFileCount, setUploadedFileCount] = useState<number | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const quillRef = useRef<any>(null);
@@ -72,7 +85,7 @@ export default function DashboardPage() {
                 // @ts-ignore
                 this.quill.history.redo();
               },
-              link: function(value) {
+              link: function(value: string) {
                 if (value) {
                   const href = prompt('Enter the URL');
                   if (href) {
@@ -205,8 +218,14 @@ export default function DashboardPage() {
         return cols[0].trim().replace(/"/g, '');
       }).filter((e) => e.includes('@'));
       
+      const uniqueEmails = [...new Set(emailsList)];
+      setUploadedFileCount(uniqueEmails.length);
       
-      addRecipient(emailsList.join(','));
+      if (uniqueEmails.length === 0) {
+        alert('0 email addresses detected');
+      } else {
+        addRecipient(uniqueEmails.join(','));
+      }
     };
     reader.readAsText(file);
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -247,6 +266,7 @@ export default function DashboardPage() {
       
       setSubject(''); setBody(''); setRecipientText(''); setRecipients([]); setScheduledAt('');
       setDelayBetween('2'); setDelayUnit('Seconds'); setHourlyLimit('10');
+      setUploadedFileCount(null);
       setIsComposeOpen(false);
       setActiveTab('scheduled');
       setShowScheduleDropdown(false);
@@ -262,9 +282,14 @@ export default function DashboardPage() {
   if (!user) {
     return (
       <div className="fixed inset-0 bg-white flex flex-col items-center justify-center p-4 z-50">
+        <div className="text-center mb-6">
+          <h1 className="text-3xl font-black text-gray-900 tracking-tight">ReachSched</h1>
+        </div>
         <div className="w-full max-w-[400px] bg-white border border-gray-200 rounded-xl p-8 shadow-sm">
           <div className="text-center mb-8">
-            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">ReachSched</h1>
+            <h2 className="text-xl font-bold text-gray-900 tracking-tight">
+              {authMode === 'login' ? 'Login' : 'Create an account'}
+            </h2>
           </div>
           
           <a
@@ -283,11 +308,29 @@ export default function DashboardPage() {
 
           <div className="relative my-6 flex items-center">
             <div className="flex-grow border-t border-gray-200"></div>
-            <span className="flex-shrink-0 mx-4 text-xs font-medium text-gray-400 bg-white px-2">or sign up through email</span>
+            <span className="flex-shrink-0 mx-4 text-xs font-medium text-gray-400 bg-white px-2">or continue with email</span>
             <div className="flex-grow border-t border-gray-200"></div>
           </div>
 
           <div className="space-y-4">
+            {authError && (
+              <div className="p-3 bg-red-50 text-red-600 text-sm font-medium rounded-lg text-center">
+                {authError}
+              </div>
+            )}
+            
+            {authMode === 'register' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                <input 
+                  type="text" 
+                  placeholder="Enter your name" 
+                  value={loginName}
+                  onChange={e => setLoginName(e.target.value)}
+                  className="w-full px-3 py-2 bg-[#F5F7F6] border border-transparent rounded-lg text-sm outline-none focus:border-gray-300 focus:bg-white transition-colors" 
+                />
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Email ID</label>
               <input 
@@ -306,11 +349,9 @@ export default function DashboardPage() {
                 value={loginPassword}
                 onChange={e => setLoginPassword(e.target.value)}
                 onKeyDown={e => {
-                  if (e.key === 'Enter' && loginEmail) {
-                    setIsLoginLoading(true);
-                    authApi.login(loginEmail, loginPassword).then(res => {
-                      setUser(res.user);
-                    }).catch(console.error).finally(() => setIsLoginLoading(false));
+                  if (e.key === 'Enter' && loginEmail && loginPassword) {
+                    const submitBtn = document.getElementById('auth-submit-btn');
+                    if (submitBtn) submitBtn.click();
                   }
                 }}
                 className="w-full px-3 py-2 bg-[#F5F7F6] border border-transparent rounded-lg text-sm outline-none focus:border-gray-300 focus:bg-white transition-colors" 
@@ -318,23 +359,44 @@ export default function DashboardPage() {
             </div>
             
             <button 
-              disabled={isLoginLoading || !loginEmail}
+              id="auth-submit-btn"
+              disabled={isLoginLoading || !loginEmail || !loginPassword || (authMode === 'register' && !loginName)}
               onClick={async () => {
+                setAuthError('');
                 setIsLoginLoading(true);
                 try {
-                  const res = await authApi.login(loginEmail, loginPassword);
+                  let res;
+                  if (authMode === 'login') {
+                    res = await authApi.login(loginEmail, loginPassword);
+                  } else {
+                    res = await authApi.register(loginEmail, loginPassword, loginName);
+                  }
                   setUser(res.user);
-                } catch (e) {
-                  console.error(e);
-                  alert('Login failed');
+                } catch (e: any) {
+                  // We catch and display the error in the UI. Next.js dev server overlay 
+                  // can aggressively pop up if we console.error it, so we just set state.
+                  setAuthError(e.message || 'Authentication failed');
                 } finally {
                   setIsLoginLoading(false);
                 }
               }}
               className="w-full mt-2 px-4 py-2.5 bg-[#00A63C] text-white font-semibold rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isLoginLoading ? 'Logging in...' : 'Login'}
+              {isLoginLoading ? 'Processing...' : (authMode === 'login' ? 'Login' : 'Create account')}
             </button>
+            
+            <div className="text-center mt-4">
+              <button
+                type="button"
+                className="text-sm font-medium text-gray-500 hover:text-gray-700 transition-colors"
+                onClick={() => {
+                  setAuthMode(authMode === 'login' ? 'register' : 'login');
+                  setAuthError('');
+                }}
+              >
+                {authMode === 'login' ? "Don't have an account? Sign up" : 'Already have an account? Login'}
+              </button>
+            </div>
             
           </div>
         </div>
@@ -493,14 +555,14 @@ export default function DashboardPage() {
                 <div className="flex items-start justify-between mb-8">
                   <div className="flex items-center gap-4">
                     <div className="w-10 h-10 rounded-full bg-[#22C55E] text-white flex items-center justify-center font-bold text-lg shrink-0">
-                      {(selectedEmail.senderName || user?.name || 'U').charAt(0).toUpperCase()}
+                      {(selectedEmail.sender?.name || user?.name || 'U').charAt(0).toUpperCase()}
                     </div>
                     <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-[15px] text-gray-900">{selectedEmail.senderName || user?.name}</span>
-                        <span className="text-sm text-gray-500">&lt;{selectedEmail.senderEmail || user?.email}&gt;</span>
+                      <div className="flex flex-col">
+                        <span className="font-bold text-[15px] text-gray-900 leading-tight">{selectedEmail.sender?.name || user?.name}</span>
+                        <span className="text-sm text-gray-500 leading-tight">{selectedEmail.sender?.email || user?.email}</span>
                       </div>
-                      <div className="flex items-center gap-1 mt-0.5 text-xs font-medium text-gray-500 cursor-pointer hover:text-gray-700">
+                      <div className="flex items-center gap-1 mt-1 text-xs font-medium text-gray-500 cursor-pointer hover:text-gray-700">
                         to {selectedEmail.toAddress} <ChevronDown size={12} />
                       </div>
                     </div>
@@ -538,7 +600,7 @@ export default function DashboardPage() {
                 </div>
                 <div className="flex items-center gap-4">
                   <button className="p-2 text-gray-400 hover:bg-gray-50 rounded-full transition-colors"><Filter size={18} /></button>
-                  <button onClick={fetchEmails} className="p-2 text-gray-400 hover:bg-gray-50 rounded-full transition-colors"><RotateCw size={18} /></button>
+                  <button onClick={() => fetchEmails()} className="p-2 text-gray-400 hover:bg-gray-50 rounded-full transition-colors"><RotateCw size={18} /></button>
                 </div>
               </div>
 
@@ -571,12 +633,28 @@ export default function DashboardPage() {
                           </span>
                         </div>
                       </div>
-                      <button 
-                        onClick={(e) => handleToggleStar(e, email)}
-                        className={`ml-4 p-1.5 shrink-0 transition-colors ${email.isStarred ? 'text-yellow-400 hover:text-yellow-500' : 'text-gray-300 hover:text-gray-400'}`}
-                      >
-                        <Star size={16} fill={email.isStarred ? "currentColor" : "none"} />
-                      </button>
+                      
+                      <div className="flex items-center gap-4 shrink-0">
+                        {activeTab === 'scheduled' ? (
+                          email.scheduledAt && (
+                            <span className="text-[12px] font-medium text-gray-400">
+                              Scheduled: {formatEmailTimestamp(email.scheduledAt)}
+                            </span>
+                          )
+                        ) : (
+                          (email.sentAt || email.updatedAt) && (
+                            <span className="text-[12px] font-medium text-gray-400">
+                              {email.status === 'failed' ? 'Failed' : 'Sent'}: {formatEmailTimestamp(email.sentAt || email.updatedAt)}
+                            </span>
+                          )
+                        )}
+                        <button 
+                          onClick={(e) => handleToggleStar(e, email)}
+                          className={`p-1.5 shrink-0 transition-colors ${email.isStarred ? 'text-yellow-400 hover:text-yellow-500' : 'text-gray-300 hover:text-gray-400'}`}
+                        >
+                          <Star size={16} fill={email.isStarred ? "currentColor" : "none"} />
+                        </button>
+                      </div>
                     </div>
                   ))
                 )}
@@ -659,7 +737,11 @@ export default function DashboardPage() {
                           <X 
                             size={12} 
                             className="cursor-pointer hover:text-red-500 opacity-70 hover:opacity-100" 
-                            onClick={() => setRecipients(prev => prev.filter(email => email !== r))}
+                            onClick={() => {
+                              const newRecipients = recipients.filter(email => email !== r);
+                              setRecipients(newRecipients);
+                              if (newRecipients.length === 0 && !recipientText) setUploadedFileCount(null);
+                            }}
                           />
                         </span>
                       ))}
@@ -679,15 +761,26 @@ export default function DashboardPage() {
                             addRecipient(recipientText);
                             setRecipientText('');
                           } else if (e.key === 'Backspace' && !recipientText && recipients.length > 0) {
-                            setRecipients(prev => prev.slice(0, -1));
+                            const newRecipients = recipients.slice(0, -1);
+                            setRecipients(newRecipients);
+                            if (newRecipients.length === 0) setUploadedFileCount(null);
                           }
                         }}
                       />
                     </div>
-                    <label className="flex items-center gap-1.5 text-[#22C55E] text-xs font-semibold cursor-pointer shrink-0 ml-4 hover:opacity-80 transition-opacity">
-                      <Upload size={14} /> Upload List
-                      <input type="file" ref={fileInputRef} accept=".csv,.txt" onChange={handleFileUpload} className="hidden" />
-                    </label>
+                    <div className="flex flex-col items-end shrink-0 ml-4">
+                      <label className="flex items-center gap-1.5 text-[#22C55E] text-xs font-semibold cursor-pointer hover:opacity-80 transition-opacity">
+                        <Upload size={14} /> Upload List
+                        <input type="file" ref={fileInputRef} accept=".csv,.txt" onChange={handleFileUpload} className="hidden" />
+                      </label>
+                      {uploadedFileCount !== null && (
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <span className="text-[10px] font-medium text-gray-500">
+                            {uploadedFileCount} email addresses detected
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   <div className="flex items-center py-4 border-b border-gray-100">

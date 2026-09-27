@@ -6,6 +6,7 @@ import {
   SlackStatus,
   EmailStats,
   RateLimitConfig,
+  Email,
 } from '@/types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
@@ -35,6 +36,11 @@ export const authApi = {
     fetchApi<AuthResponse>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
+    }),
+  register: (email: string, password?: string, name?: string) =>
+    fetchApi<AuthResponse>('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ email, password, name }),
     }),
   logout: () => fetchApi<{ message: string }>('/api/auth/logout', { method: 'POST' }),
   getGoogleAuthUrl: () => `${API_BASE}/api/auth/google`,

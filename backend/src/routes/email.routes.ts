@@ -5,7 +5,7 @@ import { emailQueue } from '../lib/queue';
 import { config } from '../config';
 import multer from 'multer';
 import { parse } from 'csv-parse/sync';
-import { indexEmail, searchEmails } from '../lib/elasticsearch';
+import { indexEmail, searchEmails, removeEmailFromIndex } from '../lib/elasticsearch';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -120,7 +120,7 @@ router.post('/schedule', upload.single('csv'), async (req: Request, res: Respons
           toAddress: recipient,
           subject,
           body: emailBody,
-          scheduledAt: new Date(Date.now() + jobDelay),
+          scheduledAt: new Date(scheduledDate.getTime() + (i * betweenDelayMs)),
           status: EmailStatus.pending,
           hourlyLimit: hourlyLimit ?? config.rateLimit.maxPerHourPerSender,
         },
@@ -348,10 +348,6 @@ router.delete('/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Email not found' });
     }
 
-    if (email.status === EmailStatus.sent) {
-      return res.status(400).json({ error: 'Cannot cancel an already sent email' });
-    }
-
     // Remove from BullMQ queue
     try {
       const job = await emailQueue.getJob(id);
@@ -362,6 +358,9 @@ router.delete('/:id', async (req: Request, res: Response) => {
 
     // Delete from DB
     await prisma.email.delete({ where: { id } });
+
+    // Remove from Elasticsearch
+    await removeEmailFromIndex(id);
 
     return res.json({ message: 'Email cancelled and removed' });
   } catch (error) {
