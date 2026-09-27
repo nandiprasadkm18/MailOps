@@ -37,6 +37,10 @@ export default function DashboardPage() {
   const [isLoadingEmails, setIsLoadingEmails] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [filterStatus, setFilterStatus] = useState<string>('All');
+  const filterRef = useRef<HTMLDivElement>(null);
   
   // Login State
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
@@ -62,6 +66,16 @@ export default function DashboardPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const quillRef = useRef<any>(null);
   const editorRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (filterRef.current && !filterRef.current.contains(event.target as Node)) {
+        setIsFilterOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -171,6 +185,10 @@ export default function DashboardPage() {
       return () => clearInterval(interval);
     }
   }, [user, activeTab, isComposeOpen, fetchEmails, fetchStats]);
+
+  useEffect(() => {
+    setFilterStatus('All');
+  }, [activeTab]);
 
   const handleToggleStar = async (e: React.MouseEvent, emailToUpdate: Email) => {
     e.stopPropagation();
@@ -404,6 +422,10 @@ export default function DashboardPage() {
     );
   }
 
+  const filteredEmails = emails.filter(email => 
+    filterStatus === 'All' || email.status.toLowerCase() === filterStatus.toLowerCase()
+  );
+
   return (
     <div className="flex flex-col flex-1 h-full w-full min-h-0">
       {/* Main Application Shell */}
@@ -588,7 +610,7 @@ export default function DashboardPage() {
             <>
               {/* Toolbar */}
               <div className="h-[72px] flex items-center px-8 border-b border-gray-100 gap-6 shrink-0">
-                <div className="flex-1 max-w-xl relative">
+                <div className="flex-1 relative">
                   <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
                   <input 
                     type="text" 
@@ -598,9 +620,41 @@ export default function DashboardPage() {
                     onChange={(e) => setSearchQuery(e.target.value)}
                   />
                 </div>
-                <div className="flex items-center gap-4">
-                  <button className="p-2 text-gray-400 hover:bg-gray-50 rounded-full transition-colors"><Filter size={18} /></button>
-                  <button onClick={() => fetchEmails()} className="p-2 text-gray-400 hover:bg-gray-50 rounded-full transition-colors"><RotateCw size={18} /></button>
+                <div className="flex items-center gap-6 shrink-0">
+                  <div className="relative" ref={filterRef}>
+                    <button 
+                      onClick={() => setIsFilterOpen(!isFilterOpen)} 
+                      className={cn(
+                        "p-2 rounded-full transition-colors flex items-center justify-center", 
+                        isFilterOpen || filterStatus !== 'All' ? "text-gray-900 bg-gray-100" : "text-gray-400 hover:bg-gray-50"
+                      )}
+                    >
+                      <Filter size={18} />
+                    </button>
+                    {isFilterOpen && (
+                      <div className="absolute top-full right-0 mt-2 w-48 bg-white border border-gray-100 rounded-xl shadow-lg z-50 overflow-hidden py-1">
+                        <div className="px-4 py-2 text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1">
+                          Filter Status
+                        </div>
+                        {['All', ...(activeTab === 'scheduled' ? ['Queued'] : ['Sent', 'Failed'])].map(status => (
+                          <button
+                            key={status}
+                            onClick={() => { setFilterStatus(status); setIsFilterOpen(false); }}
+                            className="w-full text-left px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 flex items-center justify-between transition-colors"
+                          >
+                            {status}
+                            <div className={cn(
+                              "w-3 h-3 rounded-full border border-gray-300 transition-colors", 
+                              filterStatus === status ? "bg-[#00A63C] border-transparent" : ""
+                            )} />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <button onClick={() => fetchEmails()} className="p-2 text-gray-400 hover:bg-gray-50 rounded-full transition-colors">
+                    <RotateCw size={18} />
+                  </button>
                 </div>
               </div>
 
@@ -608,10 +662,10 @@ export default function DashboardPage() {
               <div className="flex-1 overflow-y-auto">
                 {isLoadingEmails ? (
                   <div className="p-8 text-center text-sm text-gray-500 font-medium">Loading...</div>
-                ) : emails.length === 0 ? (
+                ) : filteredEmails.length === 0 ? (
                   <div className="p-8 text-center text-sm text-gray-400 font-medium">No emails found.</div>
                 ) : (
-                  emails.map(email => (
+                  filteredEmails.map(email => (
                     <div 
                       key={email.id} 
                       onClick={() => setSelectedEmail(email)}
